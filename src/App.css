@@ -1,0 +1,48 @@
+.welcome {
+  max-width: 640px;
+  padding: 48px;
+  border: 1px solid #dbe2ec;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 16px 48px #17243b0a;
+}
+
+.eyebrow {
+  color: #315bd1;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: clamp(26px, 5vw, 36px);
+}
+
+p {
+  line-height: 1.8;
+}
+
+button {
+  margin-top: 12px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 10px;
+  background: #315bd1;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #2349af;
+}
+
+button:focus-visible {
+  outline: 3px solid #8ca7ff;
+  outline-offset: 4px;
+}
+
+@media (max-width: 480px) {
+  .welcome {
+    padding: 28px;
+  }
+}
