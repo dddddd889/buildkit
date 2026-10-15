@@ -6,6 +6,8 @@
 
 本次问答见教程第 14 节「本次问答与缓存实验」，包含跨 RUN、跨阶段、跨 build 的验证命令，以及 `cat` 没打印、`ROUND=2` 命中旧缓存、文档变化触发前端重新打包和 SHA-256 文件校验的具体说明。
 
+GitLab CI 样例见教程第 19 节：按需制作 Node 工具镜像，业务 Job 直接执行 lint、打包和静态文件发布，npm 下载包使用 GitLab cache，`dist/` 使用 artifacts 传递。本仓库没有因此新增实际 CI 配置。
+
 ## 本地开发
 
 使用 Node 24；项目提供 `.nvmrc` 和 `.node-version`。
