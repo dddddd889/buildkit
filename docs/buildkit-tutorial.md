@@ -810,6 +810,43 @@ Dockerfile.cache-demo
 
 实现和规则来源：[SHA-256 摘要实现](https://github.com/moby/buildkit/blob/master/util/cachedigest/digest.go)、[文件信息校验实现](https://github.com/moby/buildkit/blob/master/cache/contenthash/filehash.go)、[路径及目录校验实现](https://github.com/moby/buildkit/blob/master/cache/contenthash/checksum.go)、[官方关于 mtime 的说明](https://docs.docker.com/build/cache/invalidation/)。
 
+### Q16：为什么很难体会到 BuildKit 和普通镜像缓存的区别？
+
+BuildKit 是执行构建的程序，普通的构建步骤缓存也是它支持的功能。现代 `docker build` 通常已经通过 Buildx 调用 BuildKit，因此仅把命令换成 `docker buildx build`，不一定能观察到速度变化。
+
+前面真正比较的是以下两种 Dockerfile 写法。两者都有步骤缓存，第二种另外保留 npm 下载目录。
+
+```dockerfile
+# 写法一：安装成功后，整个步骤的文件系统结果可以被缓存。
+RUN npm ci
+```
+
+```dockerfile
+# 写法二：除步骤结果外，单独保留 npm 下载缓存，供安装重跑时读取。
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline
+```
+
+假设项目原来有 100 个依赖包，现在新增 1 个包，原来的 100 个包及版本都不变。两种写法的行为如下：
+
+| 实际操作 | 只有步骤缓存 | 另外配置 npm 下载缓存挂载 |
+| --- | --- | --- |
+| 不修改任何文件，再构建一次 | 安装步骤显示 `CACHED`，不执行 npm | 同样显示 `CACHED`，不执行 npm，也不会实际读取下载缓存 |
+| 只修改 `src/App.tsx`，依赖安装位于源码复制之前 | 依赖安装通常仍显示 `CACHED`，后面的页面打包重跑 | 同样如此，这次仍看不出下载缓存的作用 |
+| 修改锁文件，新增 1 个包，安装步骤没有匹配的旧结果 | 执行 `npm ci`；如果输入文件系统没有其他 npm 缓存，需要重新下载所需包 | 执行 `npm ci`；挂载中原有的 100 个包可复用，缺少的包再获取 |
+
+第三种情况才是观察下载缓存收益的重点。两种写法都要重新生成 `node_modules`，第二种主要省掉已有包的网络下载，并没有跳过整个安装过程。
+
+没有挂载时，上一次安装生成的 `/root/.npm` 保存在旧安装步骤的文件系统结果中；锁文件变化后重新执行安装，不会自动把这个旧步骤的下载缓存作为输入。配置缓存挂载后，下载目录由 builder 单独保存，安装步骤重跑时仍可以访问。
+
+这也解释了为什么重复执行相同构建命令看不出差异：两种写法都直接复用安装结果，npm 根本没有执行。应观察安装步骤实际重跑时的 npm 获取日志，或者按第 8 节执行离线安装验证。
+
+之前的 `/cache/history.txt` 实验只证明相同缓存目录可以跨 RUN、跨阶段、跨构建保留文件。它没有安装 npm 依赖，不能直接展示下载缓存对安装速度的影响。
+
+第 8 节的离线验证更直接：让安装步骤真正执行，同时执行 `npm ci --offline` 并禁用该步骤网络。如果安装成功，说明下载包可以从已有缓存中取得；如果安装步骤只显示 `CACHED`，这次没有验证到 npm 下载缓存。
+
+来源：[Docker 构建概览](https://docs.docker.com/build/concepts/overview/)、[npm 缓存挂载示例](https://docs.docker.com/build/cache/optimize/#use-cache-mounts)。
+
 ## 15 远端缓存：让另一个 Runner 复用构建结果
 
 本节补充 WMS 公共模板验证，以及本地两套 builder 的复现实验。区分三样东西：安装好的依赖、下载过的包、描述构建结果的缓存元数据。
@@ -982,3 +1019,365 @@ cache:
 目标是“重新生成 node_modules，尽量只下载缺失包”，不是保证只下载新增的直接依赖。新的间接依赖、平台包、安装脚本额外下载和被清理的内容也可能需要网络。`--prefer-offline` 不是禁止联网。
 
 来源：[GitLab 缓存及共享存储要求](https://docs.gitlab.com/ci/caching/)、[Yarn Classic 缓存路径配置](https://classic.yarnpkg.com/lang/en/docs/yarnrc/)、[BuildKit 缓存挂载规则](https://docs.docker.com/reference/dockerfile/#run---mounttypecache)。
+
+## 17 缓存挂载、远端导出与本地模拟 QA
+
+### Q1：开启 BUILDKIT_INLINE_CACHE 后，RUN --mount=type=cache 的内容存在哪里？
+
+```dockerfile
+# RUN 执行时将 builder 管理的目录挂载到 /cache。
+RUN --mount=type=cache,id=cross-build-demo-v1,target=/cache \
+    cat /cache/history.txt
+```
+
+仍存放在当前 builder 的缓存存储中。开启 `BUILDKIT_INLINE_CACHE=1` 不会把这个挂载目录上传到镜像仓库。
+
+| 配置 | 含义 |
+| --- | --- |
+| `id=cross-build-demo-v1` | 当前 BuildKit 存储内这份目录缓存的名字，不是远端地址 |
+| `target=/cache` | 本条 RUN 执行时访问缓存的路径，不是 Mac 上的目录 |
+| 实际保存位置 | 当前 builder 管理的缓存空间 |
+
+对本项目的 `docker-container` 构建器 `demo-builder`，数据保存在 Docker volume 中，在 Docker Desktop 的 Linux 虚拟机内。
+
+```text
+RUN 写入普通文件路径
+  → 构建层结果
+  → 可以随 inline 缓存复用
+
+RUN 写入挂载点 /cache
+  → builder 单独管理的目录缓存
+  → 不进入镜像层，不随 inline 上传
+```
+
+同一个 BuildKit、相同 id 且缓存未被清理时可以复用；换成独立 builder，即使 id 相同，也不会自动得到原来的目录内容。
+
+### Q2：--cache-to 和 --cache-from 一起怎么理解？
+
+```shell
+--cache-to "type=registry,ref=${CACHE_IMAGE},mode=max" \
+--cache-from "type=registry,ref=${CACHE_IMAGE}"
+```
+
+这是构建前读取远端层缓存，构建后将本次层缓存导出到远端。参数书写先后不代表先上传再下载。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--cache-from` | 导入缓存来源，供本次构建匹配和复用 |
+| `--cache-to` | 导出本次构建缓存，供后续构建使用 |
+| `type=registry` | 使用镜像仓库存储 |
+| `ref=${CACHE_IMAGE}` | 指定仓库地址和标签 |
+| `mode=max` | 导出中间阶段的层缓存，例如未进入最终 Nginx 镜像的 Node 安装层 |
+
+```text
+远端旧缓存
+    ↓ --cache-from
+本次构建：复用匹配的步骤，执行变化的步骤
+    ↓ --cache-to
+更新远端缓存标签，指向本次导出的缓存
+```
+
+第一次没有远端缓存时，导入可能提示找不到；构建仍可继续，成功后导出缓存。认证、网络或导出错误需要另行检查，不能把所有错误都视为正常。
+
+`mode=max` 不包含 `RUN --mount=type=cache` 挂载中的内容；它不是把所有目录都打包上传。这套 registry cache 方案不需要额外设置 `BUILDKIT_INLINE_CACHE=1`。
+
+### Q3：没有远端仓库，本地能模拟 --cache-to / --cache-from 吗？
+
+能。将 `type=registry` 换成 `type=local`，先把层缓存导出到本机目录，再让一套新的 builder 导入它。
+
+在同一个终端执行以下命令；两次构建之间保持项目文件不变：
+
+```shell
+cd /Users/yhding/ws/demo/buildkit
+
+# 将缓存导出到项目外，避免被 COPY . . 带进构建上下文。
+export DEMO_CACHE_DIR="$(mktemp -d /tmp/buildkit-cache.XXXXXX)"
+
+# 第一套 builder 构建并导出中间阶段的层缓存。
+docker buildx build --builder demo-builder \
+  -f Dockerfile.build \
+  --cache-to "type=local,dest=${DEMO_CACHE_DIR},mode=max" \
+  --output type=local,dest=./dist-docker \
+  --progress=plain .
+
+# 新 builder 模拟一台没有本项目内部缓存的新 Runner。
+# 如果同名 builder 已用过，换一个新名字，并同步修改后面的命令。
+docker buildx create \
+  --name local-cache-reader \
+  --driver docker-container
+
+# 从刚才的目录导入缓存，依旧将前端产物导出到 dist-docker。
+docker buildx build --builder local-cache-reader \
+  -f Dockerfile.build \
+  --cache-from "type=local,src=${DEMO_CACHE_DIR}" \
+  --output type=local,dest=./dist-docker \
+  --progress=plain .
+```
+
+第二次应关注安装和打包步骤是否命中：
+
+```text
+RUN npm ci ...       CACHED
+RUN npm run build    CACHED
+```
+
+新 builder 从未构建过该项目，又成功导入缓存且命中这些步骤，才能说明本地缓存导出、导入生效。不要加 `--no-cache`；它会使本次实验无法观察这些步骤的正常缓存复用。新 builder 的启动和基础镜像元数据解析仍可能需要网络，因此“无需远端缓存仓库”不代表整个实验完全离线。
+
+| 存储方式 | 保存在哪里 | 是否自动同步 cache mount |
+| --- | --- | --- |
+| `type=registry` | 镜像仓库 | 否 |
+| `type=local` | `dest` 指定的文件目录 | 否 |
+
+两种导出方式都不需要 `BUILDKIT_INLINE_CACHE=1`。这些是可复现命令，不代表教程已实际执行并验证这轮实验。
+
+### Q4：不指定 cache-from / cache-to，默认是不是 local？
+
+默认使用 builder 内部的本地缓存，但不等于 `type=local` 导出格式。
+
+| 配置 | 行为 |
+| --- | --- |
+| 不指定导入、导出参数 | 自动复用并保存当前 builder 的内部缓存 |
+| `--cache-to type=local,dest=目录` | 显式导出层缓存到文件目录 |
+| `--cache-from type=local,src=目录` | 显式从文件目录读取层缓存 |
+
+当前工作目录不是默认缓存目录。命令末尾的 `.` 是构建上下文；`--output type=local,dest=./dist-docker` 保存的是前端产物；只有显式指定 `--cache-to type=local,dest=./build-cache`，才把层缓存导出到当前目录的 `build-cache`。
+
+来源：[本地缓存导入与导出](https://docs.docker.com/build/cache/backends/local/)、[registry cache](https://docs.docker.com/build/cache/backends/registry/)、[缓存挂载规则](https://docs.docker.com/reference/dockerfile/#run---mounttypecache)。
+
+## 18 直观对比：整个镜像复用、BuildKit 层缓存和下载缓存
+
+### Q：怎样直观体会它们的区别？
+
+用“项目只改了一行页面文案”这个场景观察。下面是用于解释复制顺序的简化 Dockerfile，实际项目还需要复制入口、配置及其他构建文件：
+
+```dockerfile
+FROM node:24 AS build
+WORKDIR /app
+
+# 依赖清单独立复制，让源码变化不影响安装步骤。
+COPY package.json yarn.lock ./
+RUN yarn install
+
+# 页面代码变化后，仅重新复制源码并打包。
+COPY src ./src
+RUN yarn build
+```
+
+| 方式 | 白话理解 | 改页面文案后 |
+| --- | --- | --- |
+| 整个镜像复用 | 直接使用上次的完整结果 | 旧镜像仍是旧页面，不能当成本次新结果 |
+| BuildKit 层缓存 | 没变的步骤复用，变化的步骤重做 | 跳过安装依赖，重新复制源码、打包 |
+| 下载目录缓存 | 安装重做时，尽量不重复下载包 | 本次安装跳过，因此用不到下载缓存 |
+
+BuildKit 层缓存的日志会像这样：
+
+```text
+COPY package.json yarn.lock ./    CACHED
+RUN yarn install                 CACHED    ← 复用已装好的 node_modules
+COPY src ./src                   DONE      ← 文案改变，复制步骤执行
+RUN yarn build                   DONE      ← 重新生成页面
+```
+
+再换成“新增依赖，yarn.lock 改变”的场景。如果没有匹配新输入的已有缓存记录，安装步骤就要重新执行：
+
+```text
+COPY package.json yarn.lock ./    DONE
+RUN yarn install                 DONE      ← 安装步骤重新执行
+COPY src ./src                   DONE
+RUN yarn build                   DONE
+```
+
+此时可以用下载目录缓存减少网络下载：
+
+```dockerfile
+# 明确让 Yarn 使用挂载目录保存下载包。
+ENV YARN_CACHE_FOLDER=/yarn-cache
+
+# 安装步骤重跑时复用已有包，缺少的内容仍可联网获取。
+RUN --mount=type=cache,target=/yarn-cache \
+    yarn install --prefer-offline
+```
+
+Yarn 仍要安装依赖，但会尽量复用缓存中的下载包，只补下载缺少的内容。命令确实执行，因此该步骤不会显示 `CACHED`；下载缓存是否可用，还取决于 builder、缓存保留情况和包是否齐全。
+
+```text
+整个镜像复用：整次构建不做，直接使用已有镜像。
+层缓存命中：这一步不做，直接使用这一步的结果。
+下载缓存命中：这一步照做，但包尽量不重新下载。
+```
+
+WMS 公共模板按提交 SHA 找到已有镜像后提前退出，属于整个镜像复用；日志中的 `RUN yarn install CACHED` 属于层缓存；`RUN --mount=type=cache` 提供的是安装执行时可使用的下载目录缓存。
+
+`inline cache`、`registry cache` 和 `local cache` 解决的是“构建层缓存保存在哪里，以及怎样供另一个 builder 导入”，不是新的缓存粒度。它们不会自动同步下载缓存挂载目录。
+
+## 19 GitLab CI 最佳实践示例：构建、远端层缓存与部署分离
+
+下面是独立项目可参考的完整示例，适合本教程的 npm 前端项目。它只构建、推送镜像，不部署；不会替换 WMS 当前的公共模板配置。本节仅补充文档，未创建或运行流水线。
+
+### 19.1 先明确缓存策略
+
+- 相同输入复用 BuildKit 构建层，避免重新安装和编译。
+- 用 registry cache 的 `mode=max` 保存 Node 中间阶段，即使最终镜像只包含 Nginx 和静态文件。
+- 用分支标签隔离缓存写入，同分支串行构建，降低并发覆盖。
+- 当前示例不导出 npm/Yarn cache mount；锁文件变化、新 Runner 没有下载缓存时，仍可能重新下载依赖。
+- 缓存用于加速，缺失时仍允许正常联网构建。
+
+### 19.2 先预构建工具镜像，再供后续 Job 使用
+
+前提：项目已开启 GitLab Container Registry；Runner 使用 Docker executor，且管理员允许 privileged Docker-in-Docker。镜像标签需根据组织镜像源和维护策略选择；这里固定版本，避免 `latest` 漂移。使用宿主 Docker 的 Shell Runner 不应直接照搬本例的 DinD 服务和连接变量。
+
+工具镜像放在 `.gitlab/ci-tools/Dockerfile`，只包含 CI 工具，不放应用源码和 Token：
+
+```dockerfile
+# Docker CLI 镜像已经包含 Buildx 插件，统一增加各 Job 需要的工具。
+FROM docker:28.5.1-cli
+RUN apk add --no-cache bash git jq \
+    && docker buildx version
+```
+
+CI 分成两个阶段，`prepare` 推送工具镜像，`build` 阶段的多个 Job 通过同一个 `image:` 使用它：
+
+```text
+prepare-ci-tools → 推送 ci-tools:<提交 SHA>
+                         ↓
+              ┌──────────┴──────────┐
+       check-ci-tools          build-image
+       使用工具镜像            使用同一工具镜像
+```
+
+```yaml
+stages:
+  - prepare
+  - build
+
+workflow:
+  rules:
+    # 三个 Job 使用相同的流水线范围，避免工具镜像未生成就被引用。
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH'
+    - when: never
+
+variables:
+  # 本次 Pipeline 的工具镜像；prepare 成功后，后续 Job 才拉取它。
+  CI_TOOLS_IMAGE: '$CI_REGISTRY_IMAGE/ci-tools:$CI_COMMIT_SHA'
+  DOCKER_HOST: tcp://docker:2376
+  DOCKER_TLS_CERTDIR: /certs
+  DOCKER_TLS_VERIFY: '1'
+  DOCKER_CERT_PATH: /certs/client
+  BUILD_PLATFORM: linux/amd64
+
+.docker-job:
+  services:
+    - name: docker:28.5.1-dind
+      alias: docker
+  before_script:
+    # 密码通过标准输入提供，不放在命令参数中。
+    - printf '%s' "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" --username "$CI_REGISTRY_USER" --password-stdin
+
+prepare-ci-tools:
+  extends: .docker-job
+  stage: prepare
+  # 首次制作工具镜像使用现成的 Docker CLI 镜像，避免自举循环。
+  image: docker:28.5.1-cli
+  script:
+    - docker buildx build --platform "$BUILD_PLATFORM" -f .gitlab/ci-tools/Dockerfile --tag "$CI_TOOLS_IMAGE" --push .gitlab/ci-tools
+
+check-ci-tools:
+  stage: build
+  # Runner 在 Job 启动前拉取 prepare 阶段刚推送的镜像。
+  image: '$CI_TOOLS_IMAGE'
+  script:
+    - docker --version
+    - docker buildx version
+    - git --version
+    - jq --version
+
+build-image:
+  extends: .docker-job
+  stage: build
+  image: '$CI_TOOLS_IMAGE'
+  # 同分支串行写入远端缓存；不同分支写入不同标签。
+  resource_group: build-cache-$CI_COMMIT_REF_SLUG
+  interruptible: true
+  script:
+    - |
+      set -eu
+      # CLI 和 Buildx 来自工具镜像，BuildKit 引擎由独立 builder 启动。
+      docker buildx create --name ci-builder --driver docker-container --use
+      docker buildx inspect --bootstrap
+      export APP_IMAGE="${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHA}"
+      export CACHE_IMAGE="${CI_REGISTRY_IMAGE}:buildcache-${CI_COMMIT_REF_SLUG}-amd64"
+      docker buildx build \
+        --builder ci-builder \
+        --platform "${BUILD_PLATFORM}" \
+        -f Dockerfile \
+        --progress=plain \
+        --cache-from "type=registry,ref=${CACHE_IMAGE}" \
+        --cache-to "type=registry,ref=${CACHE_IMAGE},mode=max" \
+        --tag "${APP_IMAGE}" \
+        --push .
+  after_script:
+    # 仅清理本 Job 的 builder。
+    - docker buildx rm ci-builder
+    - docker logout "$CI_REGISTRY"
+```
+
+
+这里预构建的是“CI 工具镜像”，里面有 Docker CLI、Buildx 和常用工具；真正执行构建的 BuildKit daemon 由 `docker-container` builder 启动，仍可能需要拉取 `moby/buildkit` 镜像。仅把客户端打包进镜像，不会把运行中的 BuildKit 服务或缓存一起带入后续 Job。
+
+`image:` 只在 Docker/Kubernetes executor 下提供这里描述的执行环境；当前 WMS 的 Shell Runner #693 不按此方式使用 Job 镜像。镜像必须先推到仓库，不能依赖前一个 Job 的本地 `--load`，因为后续 Job 可能换 Runner。工具镜像与服务的架构需匹配 Runner，本例假设 amd64。
+
+此例为方便学习，每个提交先制作工具镜像。正式项目可将工具镜像放到独立流水线，只有工具 Dockerfile 或版本变化时才重建，下游引用固定版本或 digest。不要只给 prepare 添加 `rules:changes`、却让后续 Job 继续引用每次都变化的提交 SHA 标签，否则未重建时会拉取不存在的镜像。
+
+后续 Job 能共享的是预装工具，不是前一个 Job 正在运行的进程或 builder 内部缓存；构建层仍通过远端 `--cache-from/--cache-to` 共享。工具镜像没有 Node，如后续 Job 需要直接运行 npm 测试，应在工具镜像中增加固定版本的 Node，或为该 Job 选择专用 Node 工具镜像。
+
+Runner 还需共享 DinD TLS 客户端证书目录，例如在管理员维护的 `config.toml` 中配置：
+
+```toml
+[runners.docker]
+  privileged = true
+  volumes = ["/certs/client", "/cache"]
+```
+
+这不是项目 YAML 可以自动完成的配置。Runner 标签也应按公司实际可用的 Docker executor Runner 补充；privileged DinD 应只用于允许该执行方式的隔离 Runner。
+
+镜像和缓存地址不同，分别类似：
+
+```text
+registry.example.com/team/project:42a33712...       ← 完整提交 SHA 镜像
+registry.example.com/team/project:buildcache-main-amd64  ← 分支层缓存
+```
+
+缓存标签不会自动累积所有历史构建；它会更新为本轮导出的缓存。GitLab 对受保护变量和分支的限制仍适用，示例不保证不同信任边界可以共享写权限。跨分支首次构建可能需要重新填充缓存；若要读取默认分支缓存，可另加只读 `--cache-from`，同时保留分支隔离的写地址。
+
+### 19.3 Dockerfile 如何配合
+
+本教程的 `Dockerfile` 用于生成 Nginx 运行镜像；`Dockerfile.build` 用于导出静态文件。上面的 CI 因为使用 `--push`，选择前者。
+
+推荐顺序：先复制 `package.json` 和锁文件，安装依赖，再复制源码、执行构建，最后只复制 `dist` 到 Nginx。这样改页面文案不会使依赖安装步骤失效。`.dockerignore` 应排除 `node_modules`、本地构建产物、`.git`、不需要的文档及实验结果。
+
+私有包认证应使用 `--secret` 和 `RUN --mount=type=secret`；不要把 Token 写入 Dockerfile、`ARG`、镜像层或缓存目录。示例没有私有包认证，如项目需要，应另行加入短期凭据并保持现有认证初始化。
+
+### 19.4 已有公共模板时怎么选
+
+WMS 已有公共 `.build`，继续通过 `!reference` 保留其初始化和构建脚本，不复制上面的独立 Job 覆盖它。
+
+| 场景 | 推荐做法 |
+| --- | --- |
+| 当前 WMS 单阶段依赖验证镜像 | 保留已验证的 inline cache 参数和 `:buildcache` 标签更新 |
+| 公共模板需要支持多阶段 max 缓存 | 在共享模板提供 builder、cache-from、cache-to 的明确扩展接口，并验证驱动能力 |
+| 新建独立项目且允许 DinD | 可参考上面的工具镜像预构建和 buildx registry cache 示例 |
+| 希望锁文件改变后跨 Runner 少下载包 | 另外设计下载目录导入、导出；registry cache 的 max 不覆盖 cache mount |
+
+公共模板当前的 `DOCKER_BUILD_ARGS` 能传递参数，但不代表所有 Runner 都支持 registry cache 导出。默认 Docker driver 的部分导出能力依赖 containerd image store；本例显式创建 `docker-container` builder，避免将未经验证的驱动假设带进公共模板。
+
+### 19.5 如何验收
+
+1. 先确认 prepare 推送工具镜像成功，后续两个 Job 使用同一个工具镜像；应用构建看到 `exporting cache to registry` 完成，最终镜像成功推送。
+2. 下一次构建使用新的 Job/builder，看到远端缓存 manifest 导入。
+3. 只改页面源码时，依赖安装步骤显示 `CACHED`，源码复制和打包重新执行。
+4. 改锁文件时，安装步骤重新执行；不能要求层缓存继续命中。
+5. 查看 Pipeline Job 列表，确认没有部署 Job。
+
+用新 builder 是为了排除原 builder 内部缓存的干扰。不要通过清理共享 Runner 的全部缓存来验证，也不要用 `--no-cache` 测试正常层缓存命中。
+
+参考：[GitLab Docker-in-Docker 与 TLS](https://docs.gitlab.com/ci/docker/using_docker_build/)、[Docker registry cache](https://docs.docker.com/build/cache/backends/registry/)、[缓存驱动支持范围](https://docs.docker.com/build/cache/backends/)、[构建 secret](https://docs.docker.com/build/building/secrets/)。
