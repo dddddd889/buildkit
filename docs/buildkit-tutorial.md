@@ -1597,28 +1597,29 @@ RUN --mount=type=cache,id=demo,target=/cache \
     && echo "挂载缓存文件" > /cache/note.txt
 ```
 
-以下按 RUN 真正执行、并选择最终镜像输出的情况展示；镜像推送与远端缓存导出都是可选操作：
+以下按 RUN 真正执行、并选择最终镜像输出的情况展示；镜像推送与远端缓存导出都是可选操作。图内使用简短标签，完整路径见代码和表格；若网页图表加载失败，仍可直接按表格判断文件去向。
 
 ```mermaid
 sequenceDiagram
-    participant R as RUN 命令
-    participant L as BuildKit 本地：构建结果层
-    participant C as BuildKit 本地：独立挂载目录
-    participant I as 最终 image
+    participant R as RUN命令
+    participant L as 本地结果层
+    participant C as 本地挂载目录
+    participant I as 最终镜像
     participant S as 远端仓库
 
-    R->>L: 写入 /result.txt，内容为“普通文件”
-    R->>C: 写入 note.txt，内容为“挂载缓存文件”
-    Note over C: RUN 内通过 /cache/note.txt 访问
-    L->>I: 本例单阶段，结果层进入最终 image
-    Note over I: 有 /result.txt，没有挂载中的 note.txt
-    opt 显式推送最终镜像
-        I->>S: 上传镜像，其中包含 /result.txt
+    R->>L: 写入 result.txt
+    R->>C: 写入 note.txt
+    L->>I: result.txt 进入镜像
+
+    opt 推送镜像
+        I->>S: 上传镜像
     end
-    opt 显式 cache-to 导出到远端
+
+    opt 导出层缓存
         L->>S: 上传结果层和缓存记录
     end
-    Note over C,S: 挂载中的 note.txt 留在原 BuildKit 存储，以上操作均不上传它
+
+    Note over C: note.txt 留在本地，不上传
 ```
 
 | 文件 | BuildKit 本地存储 | 本例最终 image | 普通 cache-to |
@@ -1650,26 +1651,29 @@ RUN --mount=type=cache,id=yarn-downloads,target=/yarn-cache \
 ```mermaid
 sequenceDiagram
     participant B as BuildKit
-    participant Y as Yarn install
-    participant C as 本地挂载目录 /yarn-cache
-    participant N as 包仓库网络服务
-    participant L as 普通文件系统 /app/node_modules
+    participant Y as Yarn
+    participant C as 本地下载目录
+    participant N as 包仓库
+    participant L as 项目依赖目录
 
-    B->>C: 挂载 id=yarn-downloads 的本地存储
-    B->>Y: 执行安装，YARN_CACHE_FOLDER=/yarn-cache
-    Y->>C: 查找 React 对应版本的缓存包
-    C-->>Y: 返回已有包文件
-    Y->>L: 安装项目需要的 React 文件
-    Y->>C: 查找 lodash 对应版本的缓存包
-    C-->>Y: 没有对应包
-    Y->>N: 请求缺少的 lodash 包
+    B->>C: 挂载已有本地目录
+    B->>Y: 执行安装
+    Y->>C: 查找 React
+    C-->>Y: 返回已有包
+    Y->>L: 安装 React
+    Y->>C: 查找 lodash
+    C-->>Y: 未找到
+    Y->>N: 下载 lodash
     N-->>Y: 返回包内容
-    Y->>C: 保存 lodash 包缓存及元数据
-    Y->>L: 安装项目需要的 lodash 文件
+    Y->>C: 保存 lodash 下载包
+    Y->>L: 安装 lodash
     Y-->>B: 安装完成
-    Note over B,L: node_modules 等普通路径的文件变化成为构建结果层
-    Note over B,C: 下载包留在原 BuildKit 本地挂载，不进入该层
+
+    Note over C: 下载包留在本地，不上传
+    Note over L: node_modules 进入构建结果层
 ```
+
+图中“本地下载目录”对应 `/yarn-cache`，“项目依赖目录”对应 `/app/node_modules`，由 `YARN_CACHE_FOLDER` 告诉 Yarn 使用前者。
 
 这里的查找、写入和安装顺序用于解释数据去向；Yarn 实际会按依赖图分阶段或并发处理，不保证逐个包严格按图中的先后顺序执行。
 
