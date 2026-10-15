@@ -2188,3 +2188,148 @@ RUN yarn install
 7. 下载目录内容变化本身不会触发步骤重跑，是否跨应用共享取决于同一存储和兼容的缓存配置。
 
 参考：[inline cache](https://docs.docker.com/build/cache/backends/inline/)、[构建缓存挂载](https://docs.docker.com/reference/dockerfile/#run---mounttypecache)、[多阶段与构建目标](https://docs.docker.com/build/building/multi-stage/)。
+
+## 27 从远端层缓存到镜像继承：连续问答
+
+### Q1：必须 inline 才会让远端层缓存 CACHED 生效吗？
+
+不是。inline 只是导出远端层缓存的一种方式。
+
+| 方式 | 导出 | 导入 |
+| --- | --- | --- |
+| inline | 构建时加 BUILDKIT_INLINE_CACHE=1，再推送应用镜像 | --cache-from 指向含缓存元数据的镜像 |
+| 独立 registry cache | --cache-to type=registry,ref=缓存地址,mode=max | --cache-from 指向该缓存地址 |
+
+```shell
+# 独立 registry cache 不需要额外开启 inline。
+docker buildx build \
+  --cache-from type=registry,ref=registry.example.com/team/app:buildcache \
+  --cache-to type=registry,ref=registry.example.com/team/app:buildcache,mode=max \
+  --push -t registry.example.com/team/app:latest .
+```
+
+要显示 CACHED，需要之前成功导出该操作的缓存、本次成功导入，并且操作及相关输入匹配。仅推送普通镜像，不等于主动导出了可供新 BuildKit 恢复步骤缓存的记录。两种方式都不自动导出 cache mount 内容。
+
+### Q2：什么都不指定，直接 build 是什么？
+
+默认使用当前 builder 自己管理的内部缓存。命中就跳过步骤，未命中就执行并保存结果；不需要 inline，也不需要 cache-from/cache-to。
+
+| 项目 | 默认行为 |
+| --- | --- |
+| 步骤缓存 | 自动使用、保存到当前 BuildKit 存储 |
+| 下载缓存挂载 | Dockerfile 显式写 --mount=type=cache 才有 |
+| 远端构建缓存 | 不自动导入、导出 |
+| 推送镜像 | 不会自动推送 |
+
+普通 docker build 默认通常将最终镜像加载到当前 Docker 镜像库。对本教程的 docker-container 构建器 demo-builder，docker buildx build 默认保留构建结果缓存；需 --load 才加载镜像，或另选输出方式。
+
+这里“内部缓存位于本地”是相对于 BuildKit 存储而言；连接远程 builder 时，它不一定在执行命令的电脑上。
+
+### Q3：docker push 是什么？
+
+把本地 Docker 镜像上传到镜像仓库，供其他机器拉取。
+
+```shell
+# 构建镜像并指定目标仓库标签；示例地址需替换。
+docker build -t registry.example.com/team/app:v1 .
+# 上传本地镜像。
+docker push registry.example.com/team/app:v1
+# 其他机器可以拉取镜像。
+docker pull registry.example.com/team/app:v1
+```
+
+build 构建，push 上传，pull 下载，run 启动容器。push 不重新执行 Dockerfile，也不会自动上传 builder 全部缓存或缓存挂载目录。
+
+### Q4：docker push 与远端层缓存有什么关系？
+
+| 构建方案 | 缓存如何上传 |
+| --- | --- |
+| 普通镜像构建 | push 上传应用文件层；不会替构建补充 inline 缓存记录 |
+| inline | 缓存元数据嵌入应用镜像配置，随 push 一起上传 |
+| 独立 registry cache | 构建时由 cache-to 导出，不依赖后续 docker push |
+
+```text
+inline：构建并嵌入元数据 → 推送应用镜像 → cache-from 读取该镜像
+registry：cache-to 导出独立缓存 → 下次 cache-from 读取独立缓存
+```
+
+镜像层保存文件；缓存元数据描述哪些操作与输入对应哪些结果。普通 push 也会上传实际文件，不能说“不加 inline 就不上传 node_modules”。
+
+### Q5：普通构建没有把 node_modules 上传吗？
+
+是否上传取决于最终镜像是否包含它，与开启 inline 无关：
+
+```dockerfile
+FROM node:24
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+```
+
+此镜像包含 /app/node_modules，普通 push 就会将其随镜像层上传。但如果最终阶段重新 FROM Nginx，且只从 Node 阶段复制 dist，则最终应用镜像不包含中间阶段的 node_modules。
+
+上传依赖文件，让镜像使用者能读取这些文件；导出 BuildKit 缓存记录，让新 builder 能判断安装步骤是否可跳过。这是两个目的。
+
+### Q6：不是多阶段，而是不同 Dockerfile 多次 build 呢？
+
+多次构建本身不会自动继承。看后一个 Dockerfile 的 FROM 是否引用前一次生成的镜像。
+
+```dockerfile
+# Dockerfile.deps：构建依赖镜像。
+FROM node:24
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+```
+
+```shell
+# 先构建并发布依赖镜像，供其他构建环境使用。
+docker build -f Dockerfile.deps -t registry.example.com/team/app-deps:v1 .
+docker push registry.example.com/team/app-deps:v1
+```
+
+```dockerfile
+# Dockerfile.app：继承已经安装好依赖的镜像。
+FROM registry.example.com/team/app-deps:v1
+COPY . .
+RUN npm run build
+```
+
+第二次构建直接得到基础镜像中的 node_modules，不需要 inline。这是继承已有文件，不是本次 npm ci 命中层缓存。如果第二个 Dockerfile 仍 FROM node:24，则不会自动带着第一张镜像的依赖；同一 BuildKit 可能匹配已有步骤结果，但那属于另一条缓存路径。
+
+改锁文件不会自动重建独立的 app-deps:v1。应先更新依赖镜像，再让下游使用正确版本。COPY . . 应结合 .dockerignore 排除本机 node_modules，避免污染继承结果。
+
+### Q7：多阶段与分开 build，到底有什么区别？
+
+多阶段在一次 build 内声明依赖关系；分开 build 需要人为或由 CI 串起多次构建。
+
+| 对比 | 多阶段 | 分开 build |
+| --- | --- | --- |
+| 组织方式 | 一个 Dockerfile，多条 FROM | 多个 Dockerfile，多次构建 |
+| 传递结果 | COPY --from=阶段 | FROM 已有镜像，或显式导出、复制文件 |
+| 执行依赖 | BuildKit 按阶段依赖安排；独立阶段可能并行或跳过 | 人或 CI 负责顺序和版本 |
+| 中间镜像 | 不必单独命名或推送 | 跨 Runner 使用时通常要发布或另行传递 |
+| 锁文件变化 | 同次构建检查相关操作缓存 | 不会追溯重建独立的依赖镜像 |
+| 最终运行环境 | 可只包含 Nginx 和 dist | 也能做到，但需明确传递方式 |
+
+```dockerfile
+# 一次 build 内完成安装、编译和运行环境封装。
+FROM node:24 AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+```
+
+```text
+多阶段：Node 构建阶段 → COPY dist → Nginx 最终阶段
+分开构建：deps:v1 → 构建镜像 → 显式传递 dist → 运行镜像
+```
+
+同一个应用的编译与运行环境拆分，通常适合多阶段。多个项目共享、独立维护的工具环境，适合单独构建并发布固定版本。两种方案都能使用 BuildKit 层缓存；拆成多个 Dockerfile 不会自动获得缓存同步或版本更新能力。
+
+参考：[inline cache](https://docs.docker.com/build/cache/backends/inline/)、[registry cache](https://docs.docker.com/build/cache/backends/registry/)、[多阶段构建](https://docs.docker.com/build/building/multi-stage/)、[docker push](https://docs.docker.com/reference/cli/docker/image/push/)。
