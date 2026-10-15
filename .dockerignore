@@ -7,3 +7,5 @@ dist-docker
 .env
 .env.*
 !.env.example
+# 文档站不参与应用镜像构建。
+site/

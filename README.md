@@ -93,3 +93,17 @@ docker buildx build --builder demo-builder -f Dockerfile.build --progress=plain 
 ```
 
 导出目录中包含 `index.html` 和 `assets/`。这里使用文件输出，因此不会向 `docker images` 添加镜像；需要 Nginx 页面镜像时使用上面的 `Dockerfile` 和 `--load` 命令。
+
+## HTML 课程站
+
+教程已拆分为 70 节课程，入口为 [site/index.html](site/index.html)，含课程搜索、上一课/下一课、代码复制和本地阅读进度。
+
+```shell
+# 从原教程更新 HTML 页面。
+node scripts/build-site.mjs
+
+# 预览站点，访问 http://127.0.0.1:8765。
+python3 -m http.server 8765 --bind 127.0.0.1 --directory site
+```
+
+部署说明和资源来源见 [site/README.md](site/README.md)。Pages 部署工作流已配置；仓库需将 Pages Source 设为 GitHub Actions。部署完成后访问 https://dddddd889.github.io/buildkit/ 。

@@ -1,0 +1,473 @@
+[
+  {
+    "title": "Buildx 和 BuildKit 以及 builder 的关系",
+    "group": "开始构建",
+    "id": "lesson-01",
+    "minutes": 3
+  },
+  {
+    "title": "准备项目和构建器",
+    "group": "开始构建",
+    "id": "lesson-02",
+    "minutes": 2
+  },
+  {
+    "title": "编写用于生成静态文件的 Dockerfile",
+    "group": "开始构建",
+    "id": "lesson-03",
+    "minutes": 3
+  },
+  {
+    "title": "第一次构建并导出产物",
+    "group": "开始构建",
+    "id": "lesson-04",
+    "minutes": 2
+  },
+  {
+    "title": "再构建一次并阅读缓存日志",
+    "group": "开始构建",
+    "id": "lesson-05",
+    "minutes": 2
+  },
+  {
+    "title": "构建步骤缓存和下载缓存各自解决什么问题",
+    "group": "看懂本地缓存",
+    "id": "lesson-06",
+    "minutes": 2
+  },
+  {
+    "title": "为什么不使用 no cache 验证下载缓存",
+    "group": "看懂本地缓存",
+    "id": "lesson-07",
+    "minutes": 2
+  },
+  {
+    "title": "用联网填充和断网安装验证下载缓存",
+    "group": "看懂本地缓存",
+    "id": "lesson-08",
+    "minutes": 3
+  },
+  {
+    "title": "正确解读 npm 的 hit 和 miss 日志",
+    "group": "看懂本地缓存",
+    "id": "lesson-09",
+    "minutes": 2
+  },
+  {
+    "title": "构建缓存和 load 以及 push 的关系",
+    "group": "看懂本地缓存",
+    "id": "lesson-10",
+    "minutes": 3
+  },
+  {
+    "title": "apt 安装也可以使用下载缓存",
+    "group": "看懂本地缓存",
+    "id": "lesson-11",
+    "minutes": 2
+  },
+  {
+    "title": "CI 中的缓存边界",
+    "group": "看懂本地缓存",
+    "id": "lesson-12",
+    "minutes": 2
+  },
+  {
+    "title": "常见问题的定位方法",
+    "group": "看懂本地缓存",
+    "id": "lesson-13",
+    "minutes": 2
+  },
+  {
+    "title": "Q1：Dockerfile.build 和 Dockerfile 有什么区别？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-14",
+    "minutes": 2
+  },
+  {
+    "title": "Q2：npm ci 后面的几个参数具体做什么？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-15",
+    "minutes": 2
+  },
+  {
+    "title": "Q3：直接 RUN npm ci，不加缓存挂载，有什么影响？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-16",
+    "minutes": 2
+  },
+  {
+    "title": "Q4：--mount=type=cache 是触发 RUN 步骤缓存吗？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-17",
+    "minutes": 2
+  },
+  {
+    "title": "Q5：缓存目录可以跨 RUN 吗？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-18",
+    "minutes": 2
+  },
+  {
+    "title": "Q6：可以跨多个阶段吗？共享的是什么？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-19",
+    "minutes": 2
+  },
+  {
+    "title": "Q7：可以跨多次 build 吗？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-20",
+    "minutes": 2
+  },
+  {
+    "title": "Q8：/stage-ready 是什么，具体有什么用？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-21",
+    "minutes": 2
+  },
+  {
+    "title": "Q9：为什么写了 cat /stage-ready，却没有打印？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-22",
+    "minutes": 2
+  },
+  {
+    "title": "Q10：为什么使用 ROUND=2，产物却仍只有 build=1？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-23",
+    "minutes": 2
+  },
+  {
+    "title": "Q11：BuildKit 根据什么决定使用 CACHED？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-24",
+    "minutes": 2
+  },
+  {
+    "title": "Q12：如何从头重新实验，并避免再次命中 ROUND=2 的旧结果？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-25",
+    "minutes": 2
+  },
+  {
+    "title": "Q13：第二次的日志仍显示 CACHED，具体怎么检查？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-26",
+    "minutes": 2
+  },
+  {
+    "title": "Q14：开启缓存后，为什么 RUN npm run build 仍然重新执行？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-27",
+    "minutes": 3
+  },
+  {
+    "title": "Q15：COPY 判断文件变化，对比的是 MD5 吗？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-28",
+    "minutes": 2
+  },
+  {
+    "title": "Q16：为什么很难体会到 BuildKit 和普通镜像缓存的区别？",
+    "group": "看懂本地缓存",
+    "parent": "本次问答与缓存实验",
+    "id": "lesson-29",
+    "minutes": 3
+  },
+  {
+    "title": "WMS 已验证的 inline cache 配置",
+    "group": "远端缓存与 CI",
+    "parent": "远端缓存：让另一个 Runner 复用构建结果",
+    "id": "lesson-30",
+    "minutes": 3
+  },
+  {
+    "title": "这个缓存地址指向哪里？",
+    "group": "远端缓存与 CI",
+    "parent": "远端缓存：让另一个 Runner 复用构建结果",
+    "id": "lesson-31",
+    "minutes": 2
+  },
+  {
+    "title": "为什么没有 --cache-to？",
+    "group": "远端缓存与 CI",
+    "parent": "远端缓存：让另一个 Runner 复用构建结果",
+    "id": "lesson-32",
+    "minutes": 2
+  },
+  {
+    "title": "本地模拟两台 Runner",
+    "group": "远端缓存与 CI",
+    "parent": "远端缓存：让另一个 Runner 复用构建结果",
+    "id": "lesson-33",
+    "minutes": 2
+  },
+  {
+    "title": "远端缓存后续 QA",
+    "group": "远端缓存与 CI",
+    "id": "lesson-34",
+    "minutes": 4
+  },
+  {
+    "title": "Q1：开启 BUILDKIT_INLINE_CACHE 后，RUN --mount=type=cache 的内容存在哪里？",
+    "group": "远端缓存与 CI",
+    "parent": "缓存挂载、远端导出与本地模拟 QA",
+    "id": "lesson-35",
+    "minutes": 2
+  },
+  {
+    "title": "Q2：--cache-to 和 --cache-from 一起怎么理解？",
+    "group": "远端缓存与 CI",
+    "parent": "缓存挂载、远端导出与本地模拟 QA",
+    "id": "lesson-36",
+    "minutes": 2
+  },
+  {
+    "title": "Q3：没有远端仓库，本地能模拟 --cache-to / --cache-from 吗？",
+    "group": "远端缓存与 CI",
+    "parent": "缓存挂载、远端导出与本地模拟 QA",
+    "id": "lesson-37",
+    "minutes": 2
+  },
+  {
+    "title": "Q4：不指定 cache-from / cache-to，默认是不是 local？",
+    "group": "远端缓存与 CI",
+    "parent": "缓存挂载、远端导出与本地模拟 QA",
+    "id": "lesson-38",
+    "minutes": 2
+  },
+  {
+    "title": "直观对比：整个镜像复用、BuildKit 层缓存和下载缓存",
+    "group": "远端缓存与 CI",
+    "id": "lesson-39",
+    "minutes": 3
+  },
+  {
+    "title": "哪些东西提前安装，哪些东西每次执行？",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-40",
+    "minutes": 2
+  },
+  {
+    "title": "提前制作通用工具镜像",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-41",
+    "minutes": 2
+  },
+  {
+    "title": "业务 GitLab CI：lint、打包、发布",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-42",
+    "minutes": 5
+  },
+  {
+    "title": "这套流程中的缓存分别在哪里？",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-43",
+    "minutes": 2
+  },
+  {
+    "title": "与前面的业务镜像构建实验有什么区别？",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-44",
+    "minutes": 2
+  },
+  {
+    "title": "如何验收？",
+    "group": "远端缓存与 CI",
+    "parent": "GitLab CI 示例：预制 Node 工具镜像，业务 Job 直接打包和发布",
+    "id": "lesson-45",
+    "minutes": 2
+  },
+  {
+    "title": "Docker 与 crane 工具 QA",
+    "group": "远端缓存与 CI",
+    "id": "lesson-46",
+    "minutes": 4
+  },
+  {
+    "title": "换机器后，BuildKit 下载缓存到底还能不能用？",
+    "group": "远端缓存与 CI",
+    "id": "lesson-47",
+    "minutes": 3
+  },
+  {
+    "title": "层缓存与 BuildKit 缓存是什么关系？",
+    "group": "远端缓存与 CI",
+    "id": "lesson-48",
+    "minutes": 2
+  },
+  {
+    "title": "文本例子：同一条 RUN，两个文件写入不同存储",
+    "group": "远端缓存与 CI",
+    "parent": "两份时序图：文本写入与 Yarn 安装分别保存什么",
+    "id": "lesson-49",
+    "minutes": 2
+  },
+  {
+    "title": "Yarn 例子：Yarn 负责读写，BuildKit 负责提供目录",
+    "group": "远端缓存与 CI",
+    "parent": "两份时序图：文本写入与 Yarn 安装分别保存什么",
+    "id": "lesson-50",
+    "minutes": 3
+  },
+  {
+    "title": "第二次构建，到底执行哪条路径？",
+    "group": "远端缓存与 CI",
+    "parent": "两份时序图：文本写入与 Yarn 安装分别保存什么",
+    "id": "lesson-51",
+    "minutes": 2
+  },
+  {
+    "title": "先把三个概念放在正确的位置",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-52",
+    "minutes": 2
+  },
+  {
+    "title": "第一题：锁文件变化后，远端缓存还能复用什么？",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-53",
+    "minutes": 2
+  },
+  {
+    "title": "第二题：怎样证明命中的是远端缓存？",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-54",
+    "minutes": 2
+  },
+  {
+    "title": "第三题：COPY 顺序与安装成本",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-55",
+    "minutes": 2
+  },
+  {
+    "title": "第四题：同一 Runner 与同一 builder 有什么区别？",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-56",
+    "minutes": 2
+  },
+  {
+    "title": "第五题：诊断一份“缓存成功”报告",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-57",
+    "minutes": 3
+  },
+  {
+    "title": "本次掌握程度与自检底线",
+    "group": "问答与自测",
+    "parent": "五题自测复盘：层缓存、下载缓存和 builder",
+    "id": "lesson-58",
+    "minutes": 2
+  },
+  {
+    "title": "A→B→C→D：变量变化与下载缓存变化的区别",
+    "group": "问答与自测",
+    "id": "lesson-59",
+    "minutes": 4
+  },
+  {
+    "title": "我的原始总结",
+    "group": "问答与自测",
+    "parent": "我的七点总结与修正：用白话重新理解缓存",
+    "id": "lesson-60",
+    "minutes": 2
+  },
+  {
+    "title": "逐条修正",
+    "group": "问答与自测",
+    "parent": "我的七点总结与修正：用白话重新理解缓存",
+    "id": "lesson-61",
+    "minutes": 3
+  },
+  {
+    "title": "inline 是什么？把缓存说明书附在镜像里",
+    "group": "问答与自测",
+    "parent": "我的七点总结与修正：用白话重新理解缓存",
+    "id": "lesson-62",
+    "minutes": 2
+  },
+  {
+    "title": "可以用自己的话复述的最终版本",
+    "group": "问答与自测",
+    "parent": "我的七点总结与修正：用白话重新理解缓存",
+    "id": "lesson-63",
+    "minutes": 2
+  },
+  {
+    "title": "Q1：必须 inline 才会让远端层缓存 CACHED 生效吗？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-64",
+    "minutes": 2
+  },
+  {
+    "title": "Q2：什么都不指定，直接 build 是什么？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-65",
+    "minutes": 2
+  },
+  {
+    "title": "Q3：docker push 是什么？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-66",
+    "minutes": 2
+  },
+  {
+    "title": "Q4：docker push 与远端层缓存有什么关系？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-67",
+    "minutes": 2
+  },
+  {
+    "title": "Q5：普通构建没有把 node_modules 上传吗？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-68",
+    "minutes": 2
+  },
+  {
+    "title": "Q6：不是多阶段，而是不同 Dockerfile 多次 build 呢？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-69",
+    "minutes": 2
+  },
+  {
+    "title": "Q7：多阶段与分开 build，到底有什么区别？",
+    "group": "问答与自测",
+    "parent": "从远端层缓存到镜像继承：连续问答",
+    "id": "lesson-70",
+    "minutes": 2
+  }
+]
