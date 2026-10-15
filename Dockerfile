@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 
 # 缓存 npm 下载包，依赖变化后重新安装时仍可复用已下载的包。
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefer-offline --no-audit --no-fund
+    npm ci --prefer-offline --no-audit --no-fund --loglevel=http
 
 # 复制源码并执行 TypeScript 检查和生产构建。
 COPY . .

@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+
+# 构建阶段：在 Node 24 环境中安装依赖并生成前端产物。
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+
+# 先复制依赖清单，让业务代码变化时仍能复用安装步骤。
+COPY package.json package-lock.json ./
+
+# 挂载 npm 下载缓存，重新执行安装时尽量复用已下载的包。
+# RUN --mount=type=cache,target=/root/.npm \
+#     npm ci --prefer-offline --no-audit --no-fund --loglevel=http
+RUN npm ci --prefer-offline --no-audit --no-fund --loglevel=http
+
+# 复制源码并执行 TypeScript 检查和生产构建。
+COPY . .
+RUN npm run build
+
+# 产物阶段：仅保留 dist 内容，供 Buildx 导出到本地目录。
+FROM scratch AS artifact
+COPY --from=build /app/dist /

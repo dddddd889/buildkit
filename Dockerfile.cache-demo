@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS writer
+
+# ROUND 表示本次实验编号，改变它可以让 RUN 重新执行。
+ARG ROUND=1
+
+# 向共享缓存追加记录；普通文件用于让第二阶段依赖第一阶段。
+RUN --mount=type=cache,id=cross-build-demo-v1,target=/cache,sharing=locked \
+    printf 'build=%s\n' "$ROUND" >> /cache/history.txt \
+    && printf '%s\n' "$ROUND" > /stage-ready
+
+# 同一阶段的另一条 RUN，也能读取这份缓存。
+RUN --mount=type=cache,id=cross-build-demo-v1,target=/cache,sharing=locked \
+    cat /cache/history.txt
+
+FROM node:24-bookworm-slim AS reader
+
+# 建立阶段依赖，确保 writer 实际执行；这里没有复制缓存文件。
+COPY --from=writer /stage-ready /stage-ready
+
+# 打印第二阶段收到的文件内容
+RUN echo "第二阶段收到的标记：" && cat /stage-ready
+
+# 第二阶段挂载相同 id，读取缓存并保存实验结果。
+RUN --mount=type=cache,id=cross-build-demo-v1,target=/cache,sharing=locked \
+    cat /cache/history.txt \
+    && cp /cache/history.txt /result.txt
+
+# 最后只导出实验结果文件。
+FROM scratch AS result
+COPY --from=reader /result.txt /result.txt
