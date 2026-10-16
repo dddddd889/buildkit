@@ -96,7 +96,7 @@ docker buildx build --builder demo-builder -f Dockerfile.build --progress=plain 
 
 ## HTML 课程站
 
-教程已拆分为 70 节课程，入口为 [site/index.html](site/index.html)，含课程搜索、上一课/下一课、代码复制和本地阅读进度。
+教程已拆分为 76 节课程，入口为 [site/index.html](site/index.html)，含课程搜索、上一课/下一课、代码复制和本地阅读进度。
 
 ```shell
 # 从原教程更新 HTML 页面。
