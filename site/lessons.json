@@ -511,5 +511,47 @@
     "parent": "第二轮五题自测：从记住结论到设计验证",
     "id": "lesson-76",
     "minutes": 2
+  },
+  {
+    "title": "我的原始总结",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-77",
+    "minutes": 2
+  },
+  {
+    "title": "修正一：外挂目录的边界看存储，不看名字或宿主机",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-78",
+    "minutes": 2
+  },
+  {
+    "title": "修正二：层缓存保存结果，max 不会导出下载挂载",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-79",
+    "minutes": 2
+  },
+  {
+    "title": "builderA 的产物可以被 builderB 复用吗？",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-80",
+    "minutes": 3
+  },
+  {
+    "title": "为什么 A 的 --load 不保证 B 能读取？",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-81",
+    "minutes": 2
+  },
+  {
+    "title": "最终判断顺序",
+    "group": "问答与自测",
+    "parent": "第三次总结：下载挂载、层缓存与跨 builder 复用",
+    "id": "lesson-82",
+    "minutes": 2
   }
 ]

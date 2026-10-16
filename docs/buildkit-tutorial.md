@@ -2585,3 +2585,184 @@ CACHED → 安装不做，直接使用步骤结果。
 ```
 
 本轮评价：能在逐步引导后正确预测结果，但尚不能独立设计严谨实验。需继续练习分开说明“保存什么、存在哪里、何时读取”，避免只凭 Job 成功或单行 CACHED 宣称下载缓存有效。
+
+## 29 第三次总结：下载挂载、层缓存与跨 builder 复用
+
+本节保留学习者这次总结，逐项修正，再说明 builderA 的哪些结果可以交给 builderB。这里的 A、B 是构建环境，不是应用镜像的父子关系。
+
+### 29.1 我的原始总结
+
+以下保留原始表达与错别字。
+
+**BuildKit 存储的下载缓存挂载**
+
+> buildkit存储的下载缓存挂载，可以理解成外挂目录，不同buildkit即使同名也可能外挂的是不同内容。
+>
+> 例如：同宿主机：
+> - builderA，的/yarn-cache只支持后续基于builderA进行构建的镜像；
+> - 在builderA的基础上，builderB如果有个相同目录/yarn-cache，他俩是两个目录。
+>
+> 不同宿主机：
+> - 宿主A的builderA，的/yarn-cache只支持后续基于builderA进行构建的镜像；
+> - 宿主A1的builderA，的/yarn-cache试试不同的目录；
+
+**中间层缓存**
+
+> 中间层缓存：可以理解成RUN npm install的node_modules就放到了中间缓存层。
+> - 要复用只能整体复用。
+> - inline-cache是把缓存说明书内置到镜像里。
+> - cache-from/cache-to会把缓存说明书+缓存内容外置到指定位置。
+> - 这种缓存层只用于buildx加速。
+> - 直接跳过当前层执行。
+> - 如果是多阶段dockerfile，那么中间环村层需要通过mode=max开启，前置镜像的层缓存。
+
+**构建缓存**
+
+> 是两者总称
+
+### 29.2 修正一：外挂目录的边界看存储，不看名字或宿主机
+
+“外挂目录”这个比喻基本正确。更准确的关系是：
+
+```text
+某套 BuildKit 的实际存储 + 缓存 id → 某份目录内容
+RUN 的 target=/yarn-cache         → 执行命令时看到的入口路径
+```
+
+同宿主机的 A、B 如果使用独立 BuildKit 存储，即使 id 和 target 一样，也是两份目录。不同宿主机各自运行独立 BuildKit 时，同理。
+
+但不能只凭名字或机器位置判断：
+
+| 情况 | 能否自动访问同一份挂载缓存 |
+| --- | --- |
+| 同机、两个独立 docker-container builder，各自存储 | 通常不能 |
+| 不同机器、各自独立 BuildKit | 通常不能 |
+| 不同机器的客户端连接同一个远程 BuildKit，使用相同缓存标识 | 可以在兼容配置下共享，前提是缓存仍存在 |
+| 两个不同 builder 名称实际连接同一环境、同一存储 | 可能共享，要检查实际连接 |
+| B 的 Dockerfile 继承 A 构建的应用镜像 | 只继承镜像文件，不自动继承 A 的 cache mount |
+
+“基于 builderA 创建 builderB”不是明确的镜像继承关系。可以继承镜像，也可以配置构建环境，但不能把两者混成一回事。
+
+同一 builder 名称在不同客户端也不保证指向同一个服务。判断时看 endpoint、driver、节点和真实存储，而不是只看显示名称。
+
+### 29.3 修正二：层缓存保存结果，max 不会导出下载挂载
+
+| 原理解 | 更准确的说法 |
+| --- | --- |
+| npm install 产生的 node_modules 在中间层里 | 正常写入步骤文件系统的 node_modules 会进入结果；如果该路径本身被挂载到独立存储，则不能这样推断 |
+| 只能整体复用 | 对当前步骤而言，匹配则直接复用结果，不会自动在失效的旧 node_modules 上增量安装；传输可以按需获取层数据 |
+| inline 把说明书放进镜像 | 对，说明记录位于镜像配置中，文件内容位于原有镜像层中 |
+| cache-from/to 都把缓存外置 | cache-from 负责导入，cache-to 负责导出；local、registry 可以独立保存，inline 则附在目标镜像里 |
+| 只用于 buildx | 不对，BuildKit 执行的 docker build、buildx build、buildctl 等都能使用构建缓存 |
+| 命中后直接跳过当前层执行 | 更准确是跳过当前构建步骤，使用已有结果，不重新执行命令或重放旧终端输出 |
+| 多阶段需要 max 才有中间层缓存 | 本地 BuildKit 本来就可能保留中间结果；若要导出未进入最终镜像的中间阶段缓存，通常选支持 mode=max 的导出方式 |
+
+多阶段例子：
+
+```text
+Node 阶段：安装依赖 → 打包 → dist
+                           ↓ 只复制 dist
+Nginx 最终阶段：静态文件与 Nginx
+```
+
+最终应用镜像不包含 Node 阶段的 node_modules。registry cache 的 mode=max 可以另外保存安装结果，供下一次构建匹配；它仍不会自动保存 /yarn-cache 挂载内容。
+
+本教程把 BuildKit 管理的缓存分成“步骤结果缓存”和“缓存挂载”便于学习。文档中“构建缓存”有时专指前者，不能认定所有地方都把它作为两者的总称。
+
+```text
+步骤结果缓存：这一步做好的结果；命中后，这一步不用做。
+下载缓存挂载：重新安装时可复用的包；安装照做，尽量少下载。
+```
+
+### 29.4 builderA 的产物可以被 builderB 复用吗？
+
+可以，但要先明确“产物”是哪一种，再选择传递方式。两个独立 builder 默认不会自动共享所有东西。
+
+| A 的产物 | 如何交给 B | B 得到什么 |
+| --- | --- | --- |
+| 最终镜像 | A 推送仓库；B 用 FROM 或 COPY --from 读取 | 镜像中的实际文件 |
+| 导出的 dist 文件 | 将文件传到 B 的构建上下文，供 COPY 使用 | 静态文件，不自动包含步骤缓存记录 |
+| 构建层缓存 | A 用 cache-to 导出；B 用 cache-from 导入 | 输入匹配时可复用的步骤结果 |
+| 下载缓存挂载 | 共享同一 BuildKit 存储，或显式导出、传输、恢复目录 | Yarn/npm 安装执行时可用的下载包 |
+
+**方式一：继承 A 构建的镜像**
+
+A 构建并推送依赖镜像，下面地址是需要替换的占位示例：
+
+```shell
+# A 将包含依赖的镜像推送到双方都能访问的仓库。
+docker buildx build --builder builderA \
+  -t registry.example.com/team/app-deps:v1 \
+  --push .
+```
+
+B 的 Dockerfile：
+
+```dockerfile
+# B 继承镜像文件；若镜像包含 node_modules，这些文件也会继承。
+FROM registry.example.com/team/app-deps:v1
+WORKDIR /app
+```
+
+这叫主动继承已有文件，不等于 BuildKit 自动命中 npm install 缓存。B 的当前依赖是否与镜像中的依赖匹配，需要构建方案自己保证。
+
+也可以只复制指定文件，不继承整个运行环境：
+
+```dockerfile
+FROM registry.example.com/team/app-deps:v1 AS deps
+FROM node:24-bookworm-slim
+WORKDIR /app
+# 假设依赖镜像把已安装依赖放在该路径；需保持运行平台与环境兼容。
+COPY --from=deps /app/node_modules/ /app/node_modules/
+```
+
+两个例子都不会自动获得 A 的下载缓存挂载。
+
+**方式二：交付静态文件**
+
+A 用本地文件输出导出 dist，将文件通过 artifacts 或其他方式传给 B。B 构建时通过 COPY 读取。这是文件传递，不会把 A 的完整构建历史或缓存挂载一起传过去。
+
+**方式三：导出和导入步骤结果缓存**
+
+```shell
+# A 构建应用，并独立导出可复用的层缓存。
+docker buildx build --builder builderA \
+  --cache-to type=registry,ref=registry.example.com/team/app:buildcache,mode=max \
+  --output type=cacheonly .
+
+# B 从同一地址导入，对自己的本次输入逐步匹配。
+docker buildx build --builder builderB \
+  --cache-from type=registry,ref=registry.example.com/team/app:buildcache \
+  --output type=cacheonly .
+```
+
+两个 builder 需支持对应导出方式，拥有仓库访问权限，并保持需要复用步骤的平台、基础环境和输入匹配。示例仅保留构建缓存，实际项目按需要选择 push、load 或文件输出。
+
+**方式四：搬运下载文件**
+
+A 在安装 RUN 内把下载挂载里的包复制到普通目录，再导出成文件或专用下载缓存镜像。B 得到文件后，在安装 RUN 内复制进自己挂载的下载目录，然后安装。这是显式文件搬运，不是普通 cache-from 自动同步挂载。
+
+### 29.5 为什么 A 的 --load 不保证 B 能读取？
+
+load 将最终镜像加载到当前连接的 Docker Engine 镜像库。独立 docker-container builder B 有自己的 BuildKit 环境，不会自动把该 Engine 镜像库当作自己的基础镜像来源。
+
+```text
+A --load
+  → 当前 Docker Engine 的镜像库
+  ≠ 自动进入 B 的镜像来源或缓存存储
+```
+
+同一 Docker Engine 的 docker driver 可能直接使用其中的本地镜像，但不能把这个行为推广到所有独立 builder。跨独立环境，用双方能访问的镜像仓库传递通常更明确。
+
+### 29.6 最终判断顺序
+
+遇到“A 的东西能不能给 B 用”，先问：
+
+1. 传的是实际镜像文件、dist、步骤结果缓存，还是下载目录？
+2. A 把它放在哪里，B 是否能访问并有权限读取？
+3. B 是主动 FROM/COPY 文件，还是 cache-from 匹配步骤？
+4. 如果是下载挂载，是同一存储，还是已经显式搬运文件？
+
+镜像继承解决“拿到已有文件”；层缓存解决“跳过匹配的构建步骤”；下载缓存解决“安装重跑时少下载包”。三者能组合，但不能互相代替。
+
+参考：[多阶段与外部镜像 COPY](https://docs.docker.com/build/building/multi-stage/)、[缓存后端](https://docs.docker.com/build/cache/backends/)、[缓存挂载](https://docs.docker.com/reference/dockerfile/#run---mounttypecache)。
